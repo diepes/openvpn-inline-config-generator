@@ -1,0 +1,6 @@
+*.swp
+#dont upload secret material to git
+*.crt
+*.key
+*.ovpn
+

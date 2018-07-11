@@ -1,7 +1,9 @@
+#!/usr/bin/env python3
 import os
 import socket
 from OpenSSL import crypto, SSL
-
+''' PES clone 2018-07-12
+'''
 # OpenVPN is fairly simple since it works on OpenSSL. The OpenVPN server contains
 # a root certificate authority that can sign sub-certificates. The certificates
 # have very little or no information on who they belong to besides a filename
@@ -39,7 +41,7 @@ def make_csr(pkey, CN, C=None, ST=None, L=None, O=None, OU=None, emailAddress=No
     if CN:
         subj.CN = CN
     if emailAddress:
-        subj.emailAddress = emailAddress
+        subj.emailAddress = certemailAddress
 
     req.set_pubkey(pkey)
     req.sign(pkey, hashalgorithm)
@@ -48,7 +50,7 @@ def make_csr(pkey, CN, C=None, ST=None, L=None, O=None, OU=None, emailAddress=No
 # Create a certificate authority (if we need one)
 def create_ca(CN, C="", ST="", L="", O="", OU="", emailAddress="", hashalgorithm='sha256WithRSAEncryption'):
     cakey = make_keypair()
-    careq = make_csr(cakey, cn=CN)
+    careq = make_csr(cakey, CN=CN)
     cacert = crypto.X509()
     cacert.set_serial_number(0)
     cacert.gmtime_adj_notBefore(0)
@@ -60,13 +62,13 @@ def create_ca(CN, C="", ST="", L="", O="", OU="", emailAddress="", hashalgorithm
 
     # Set the extensions in two passes
     cacert.add_extensions([
-        crypto.X509Extension('basicConstraints', True,'CA:TRUE'),
-        crypto.X509Extension('subjectKeyIdentifier' , True , 'hash', subject=cacert)
+        crypto.X509Extension(b'basicConstraints', True,b'CA:TRUE'),
+        crypto.X509Extension(b'subjectKeyIdentifier' , True , b'hash', subject=cacert)
     ])
 
     # ... now we can set the authority key since it depends on the subject key
     cacert.add_extensions([
-        crypto.X509Extension('authorityKeyIdentifier' , False, 'issuer:always, keyid:always', issuer=cacert, subject=cacert)
+        crypto.X509Extension(b'authorityKeyIdentifier' , False, b'issuer:always, keyid:always', issuer=cacert, subject=cacert)
     ])
 
     cacert.sign(cakey, hashalgorithm)
@@ -84,10 +86,10 @@ def create_slave_certificate(csr, cakey, cacert, serial):
     cert.set_version(2)
 
     extensions = []
-    extensions.append(crypto.X509Extension('basicConstraints', False ,'CA:FALSE'))
+    extensions.append(crypto.X509Extension(b'basicConstraints', False ,b'CA:FALSE'))
 
-    extensions.append(crypto.X509Extension('subjectKeyIdentifier' , False , 'hash', subject=cert))
-    extensions.append(crypto.X509Extension('authorityKeyIdentifier' , False, 'keyid:always,issuer:always', subject=cacert, issuer=cacert))
+    extensions.append(crypto.X509Extension(b'subjectKeyIdentifier' , False , b'hash', subject=cert))
+    extensions.append(crypto.X509Extension(b'authorityKeyIdentifier' , False, b'keyid:always,issuer:always', subject=cacert, issuer=cacert))
 
     cert.add_extensions(extensions)
     cert.sign(cakey, 'sha256WithRSAEncryption')
@@ -165,7 +167,42 @@ def make_new_ovpn_file(ca_cert, ca_key, clientname, serial, commonoptspath, file
     f.write(ovpn)
     f.close()
 
+def create_ca_if_missing_deleteme_pes():
+    from time import gmtime
+    #from OpenSSL import crypto, SSL
+    C_F = "./ca.crt"
+    K_F = "./ca.key"
+    # create a key pair
+    k = crypto.PKey()
+    k.generate_key(crypto.TYPE_RSA, 1024)
+    # create a self-signed cert
+    cert = crypto.X509()
+    cert.get_subject().C = "NZ" #raw_input("Country: ")
+    cert.get_subject().ST = "AUCKLAND" #raw_input("State: ")
+    cert.get_subject().L = "AUCKLAND" #raw_input("City: ")
+    cert.get_subject().O = "NSP" #raw_input("Organization: ")
+    cert.get_subject().OU = "IT" #raw_input("Organizational Unit: ")
+    cert.get_subject().CN = "CA-20180712" #CN
+    cert.set_serial_number(1000) #inc when renew
+    cert.gmtime_adj_notBefore(0) #not valid before present time 
+    cert.gmtime_adj_notAfter(315360000) # 3,650 days, 10y
+    cert.set_issuer(cert.get_subject())
+    cert.set_pubkey(k)
+    cert.sign(k, 'sha1')
+    open(C_F, "wt").write(
+    crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
+    open(K_F, "wt").write(
+    crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
+
+def create_ca_if_missing():
+    #create_ca(CN, C="", ST="", L="", O="", OU="", emailAddress="", hashalgorithm='sha256WithRSAEncryption'):
+    cacert, cakey = create_ca(CN="pestestca")
+    open("./ca.crt", "wb").write(dump_file_in_mem(cacert))
+    open("./ca.key", "wb").write(dump_file_in_mem(cakey))
 
 if __name__ == "__main__":
-    make_new_ovpn_file("ca.crt", "ca.key", "justasictest", 0x0C, "common.txt", "justastictest.ovpn")
+    create_ca_if_missing()
+    make_new_ovpn_file(ca_cert="ca.crt", ca_key="ca.key",
+                       clientname="justasictest", serial=0x0C,
+                       commonoptspath="common.txt",  filepath="justastictest.ovpn")
     print("Done")
