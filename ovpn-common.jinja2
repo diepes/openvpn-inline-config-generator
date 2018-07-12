@@ -1,0 +1,72 @@
+#ovpn-common.jinja2 - CN={{ CN }}
+#PES 2018-07-12 template
+verb 3
+dev tun-az
+#Azure-vpn-vm=13.73.199.180
+#Azure-ras-vm=13.75.221.215
+
+{% if is_server %} #SERVER
+server {{ server_ip_pool }}
+#route
+tls-server
+remote-cert-tls client
+tls-auth direction 0
+#client-config-dir ccd
+# # iroute
+
+{% else %} #CLIENT
+client
+nobind
+remote-random
+{% for remote in remotes %}
+<connection>
+  # {{ remote.name }}
+  remote {{ remote.ip }}
+  #tls-remote <CN>
+</connection>
+{% endfor %}
+
+tls-client
+#only allow certs issued to server's
+#remote-cert-tls server
+ns-cert-type server
+tls-auth direction 1
+
+{% endif %}
+
+#From v2.4 tls-crypt can be used
+cipher AES-256-CBC
+
+comp-lzo
+keepalive 10 60
+ping-timer-rem
+persist-tun
+persist-key
+user nobody
+group nogroup
+daemon
+
+<ca>
+{{ cacert }}
+</ca>
+
+#cert CN="{{ CN }}"
+<cert>
+{{ clientcert }}
+</cert>
+
+#key CN="{{ CN }}"
+<key>
+{{ clientkey }}
+</key>
+
+<tls-auth>
+{{ tlsauth_key }}
+</tls-auth>
+
+<dh>
+{{ dh }}
+</dh>
+
+#THE END.
+

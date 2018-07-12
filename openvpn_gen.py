@@ -5,6 +5,7 @@ from OpenSSL import crypto, SSL
 import datetime
 import subprocess
 import random
+import jinja2
 
 ''' PES clone 2018-07-12
 '''
@@ -65,9 +66,10 @@ def create_ca(CN, C="", ST="", L="", O="", OU="", emailAddress="", hashalgorithm
     cacert.set_version(2)
 
     # Set the extensions in two passes
+    #PES change critical flag True->False for subjectKeyIdentifier
     cacert.add_extensions([
         crypto.X509Extension(b'basicConstraints', True,b'CA:TRUE'),
-        crypto.X509Extension(b'subjectKeyIdentifier' , True , b'hash', subject=cacert)
+        crypto.X509Extension(b'subjectKeyIdentifier' , False , b'hash', subject=cacert)
     ])
 
     # ... now we can set the authority key since it depends on the subject key
@@ -93,10 +95,10 @@ def create_slave_certificate(csr, cakey, cacert, serial, is_server):
     extensions.append(crypto.X509Extension(b'basicConstraints', False ,b'CA:FALSE'))
     extensions.append(crypto.X509Extension(b'subjectKeyIdentifier' , False , b'hash', subject=cert))
     extensions.append(crypto.X509Extension(b'authorityKeyIdentifier' , False, b'keyid:always,issuer:always', subject=cacert, issuer=cacert))
-    
+
     if is_server:
         extensions.append(crypto.X509Extension(b"keyUsage", False, b"digitalSignature,keyEncipherment"))
-        extensions.append(crypto.X509Extension(b"extendedKeyUsage", False, b"serverAuth"))
+        extensions.append(crypto.X509Extension(b"extendedKeyUsage", False, b"serverAuth")) #openvpn remote-cert-tls server
         extensions.append(crypto.X509Extension(b"nsCertType", False, b"server"))
     else:
         extensions.append(crypto.X509Extension(b"keyUsage", False, b"digitalSignature"))
@@ -152,12 +154,21 @@ def retrieve_cert_from_file(certfile):
     return load_from_file(certfile, crypto.X509)
 
 
-def make_new_ovpn_file(ca_cert, ca_key, tlsauth_key, CN, serial, commonoptspath, filepath, is_server=False):
+def make_new_ovpn_file(ca_cert, ca_key, tlsauth_key, dh, CN, serial, commonoptspath, filepath, is_server=False):
 
     # Read our common options file first
     f = open(commonoptspath, 'r')
     common = f.read()
     f.close()
+    j2_env = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.dirname(os.path.abspath(__file__))), trim_blocks=True)
+
+    common = j2_env.get_template(commonoptspath).render(
+        title='Hellow Gist from GutHub',
+        is_server=is_server,
+        CN=CN,
+        client_server = "server"  if is_server else "client",
+        tls_auth_direction = 0 if is_server else 1
+    )
 
     cacert = retrieve_cert_from_file(ca_cert)
     cakey  = retrieve_key_from_file(ca_key)
@@ -175,12 +186,27 @@ def make_new_ovpn_file(ca_cert, ca_key, tlsauth_key, CN, serial, commonoptspath,
     clientcert = dump_file_in_mem(crt)
     cacertdump = dump_file_in_mem(cacert)
     #ovpn = "%s<ca>\n%s</ca>\n<cert>\n%s</cert>\n<key>\n%s</key>\n" % (common, cacertdump.decode('ascii'), clientcert.decode('ascii'), clientkey.decode('ascii'))
-    ovpn = f"{common}\n" + \
+    #x = f"{common}\n".format(tls_auth_direction = 1 if is_server else 0 , client_server = "server"  if is_server else "client" )
+    ovpnx = f"{common}\n" + \
            f"\n<ca>\n{cacertdump.decode('ascii')}</ca>\n" + \
-           f"\n<cert>\n{clientcert.decode('ascii')}</cert>\n" + \
-           f"\n<key>\n{clientkey.decode('ascii')}</key>\n" + \
-           f"\n<tls-auth>\n{tlsauth_key}</tls-auth>\n\n"
-
+           f"\n#cert CN=\"{CN}\"\n<cert>\n{clientcert.decode('ascii')}</cert>\n" + \
+           f"\n#key CN=\"{CN}\"\n<key>\n{clientkey.decode('ascii')}</key>\n" + \
+           f"\n<tls-auth>\n{tlsauth_key}</tls-auth>\n" +\
+           f"\n<dh>\n{dh}</dh>\n\n"
+    ovpn = j2_env.get_template(commonoptspath).render(
+        title='Hellow Gist from GutHub',
+        is_server=is_server,
+        CN=CN,
+        cacert=cacertdump.decode('ascii').strip(),
+        clientcert=clientcert.decode('ascii').strip(),
+        clientkey=clientkey.decode('ascii').strip(),
+        tlsauth_key=tlsauth_key.strip(),
+        dh=dh.strip(),
+        remotes=[
+                  {"ip": "13.75.221.225 1194 udp", "name": "Azure - INF -RAS01" },
+                ],
+        server_ip_pool = "192.168.10.0  255.255.255.0",
+    )
     # Write our file.
     f = open(filepath, 'wt')
     f.write(ovpn)
@@ -189,7 +215,7 @@ def make_new_ovpn_file(ca_cert, ca_key, tlsauth_key, CN, serial, commonoptspath,
 
 def create_ca_if_missing(ca_name="ca"):
     #create_ca(CN, C="", ST="", L="", O="", OU="", emailAddress="", hashalgorithm='sha256WithRSAEncryption'):
-    cacert, cakey = create_ca(CN=f"{ca_name}")
+    cacert, cakey = create_ca(CN=f"{ca_name}", C="New Zealand", ST="Auckland", O="NSP", OU="IT")
     open(f"./{ca_name}.crt", "wb").write(dump_file_in_mem(cacert))
     open(f"./{ca_name}.key", "wb").write(dump_file_in_mem(cakey))
 
@@ -203,27 +229,38 @@ def gen_tlsauth_key():
     os.remove('ta.tmp')
     return key
 
+def gen_dhparam_dh():
+    """Generate an difyhelman key by calling openssl. Returns a string."""
+    if not os.path.isfile('dh4096.tmp'):
+        cmd = ['openssl', 'dhparam', '-out dh4096.tmp', '4096', '2>/dev/null']
+        ret = subprocess.check_call(cmd)
+    with open('dh4096.tmp') as key:
+        key = key.read()
+    #os.remove('dh4096.tmp')
+    return key
+
 if __name__ == "__main__":
     name="test"
     count = 3
+    commonoptspath="ovpn-common.jinja2"
 
     tn = datetime.datetime.now().strftime("%Y%m%d_%Hh%M")
     ca_name=f"{name}_ca_{tn}"
     create_ca_if_missing(ca_name=ca_name)
     tlsauth_key=gen_tlsauth_key()
-    
+    dh=gen_dhparam_dh()
     for c in range(1,3): #create 2 server certs
         make_new_ovpn_file(is_server=True,
                        ca_cert=f"{ca_name}.crt", ca_key=f"{ca_name}.key",
-                       tlsauth_key=tlsauth_key,
+                       tlsauth_key=tlsauth_key, dh=dh,
                        CN=f"{name}_server_{tn}_{c}", serial=random.randint(1, 99),
-                       commonoptspath="ovpn-common.txt",  filepath=f"{name}_server_{tn}_{c}.ovpn")
+                       commonoptspath=commonoptspath,  filepath=f"{name}_server_{tn}_{c}.ovpn.conf")
 
     for c in range(1,1+count):
         make_new_ovpn_file(ca_cert=f"{ca_name}.crt", ca_key=f"{ca_name}.key",
-                           tlsauth_key=tlsauth_key,
+                           tlsauth_key=tlsauth_key, dh=dh,
                            CN=f"{name}_client_{tn}_{c}", serial=random.randint(100, 99999999),
-                           commonoptspath="ovpn-common.txt",  filepath=f"{name}_client_{tn}_{c}.ovpn")
+                           commonoptspath=commonoptspath,  filepath=f"{name}_client_{tn}_{c}.ovpn.conf")
     print("Done")
 
 
