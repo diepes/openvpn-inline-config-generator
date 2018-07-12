@@ -6,7 +6,12 @@ import datetime
 import subprocess
 import random
 import jinja2
-
+#
+import argparse, logging, sys
+# logging level set with -v flag
+logging.basicConfig(level=logging.INFO,format='[%(levelname)-5s] %(message)s')
+logging.warning("Start!")
+#
 ''' PES clone 2018-07-12
 '''
 # OpenVPN is fairly simple since it works on OpenSSL. The OpenVPN server contains
@@ -238,29 +243,64 @@ def gen_dhparam_dh():
         key = key.read()
     #os.remove('dh4096.tmp')
     return key
+def get_args():
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("-v", "--verbose", dest="verbose", action="count",
+                        default=0,
+                        help="increase output verbosity"
+                        )
+    parser.add_argument("--template", dest="template", nargs='?', type=str,
+                        default="ovpn-common.jinja2",
+                        help="template to deploy on azure."
+                        )
+    parser.add_argument("--name", dest="name", nargs='?', type=str,
+                        default="test",
+                        help="prefix name for openvpn configs."
+                        )
+    parser.add_argument("--count-client", dest="count_client", nargs='?', type=int,
+                        default=3,
+                        help="number of client templates."
+                        )
+    parser.add_argument("--count-server", dest="count_server", nargs='?', type=int,
+                        default=2,
+                        help="number of server templates."
+                        )
+
+    args = parser.parse_args()
+
+    if args.verbose == 1:
+        log=logging.getLogger()
+        log.setLevel(logging.INFO)
+        logging.info(f"set logging.level to INFO verbose={args.verbose}")
+    if args.verbose > 1:
+        log=logging.getLogger()
+        log.setLevel(logging.DEBUG)
+        logging.debug(f"set logging.level to DEBUG verbose={args.verbose}")
+
+    logging.debug(f"sys.argv[0]={sys.argv[0]}  ,args={args}")
+    return args
 
 if __name__ == "__main__":
-    name="test"
-    count = 3
-    commonoptspath="ovpn-common.jinja2"
+    args = get_args()
+    commonoptspath=args.template
 
     tn = datetime.datetime.now().strftime("%Y%m%d_%Hh%M")
-    ca_name=f"{name}_ca_{tn}"
+    ca_name=f"{args.name}_ca_{tn}"
     create_ca_if_missing(ca_name=ca_name)
     tlsauth_key=gen_tlsauth_key()
     dh=gen_dhparam_dh()
-    for c in range(1,3): #create 2 server certs
+    for c in range(1,1+args.count_server): #create 2 server certs
         make_new_ovpn_file(is_server=True,
                        ca_cert=f"{ca_name}.crt", ca_key=f"{ca_name}.key",
                        tlsauth_key=tlsauth_key, dh=dh,
-                       CN=f"{name}_server_{tn}_{c}", serial=random.randint(1, 99),
-                       commonoptspath=commonoptspath,  filepath=f"{name}_server_{tn}_{c}.ovpn.conf")
+                       CN=f"{args.name}_server_{tn}_{c}", serial=random.randint(1, 99),
+                       commonoptspath=args.template,  filepath=f"{args.name}_server_{tn}_{c}.ovpn.conf")
 
-    for c in range(1,1+count):
+    for c in range(1,1+args.count_client):
         make_new_ovpn_file(ca_cert=f"{ca_name}.crt", ca_key=f"{ca_name}.key",
                            tlsauth_key=tlsauth_key, dh=dh,
-                           CN=f"{name}_client_{tn}_{c}", serial=random.randint(100, 99999999),
-                           commonoptspath=commonoptspath,  filepath=f"{name}_client_{tn}_{c}.ovpn.conf")
+                           CN=f"{args.name}_client_{tn}_{c}", serial=random.randint(100, 99999999),
+                           commonoptspath=args.template,  filepath=f"{args.name}_client_{tn}_{c}.ovpn.conf")
     print("Done")
 
 

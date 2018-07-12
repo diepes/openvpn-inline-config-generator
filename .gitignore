@@ -3,4 +3,6 @@
 *.crt
 *.key
 *.ovpn
+*.ovpn.conf
+*.conf
 
