@@ -2,6 +2,10 @@
 import os
 import socket
 from OpenSSL import crypto, SSL
+import datetime
+import subprocess
+import random
+
 ''' PES clone 2018-07-12
 '''
 # OpenVPN is fairly simple since it works on OpenSSL. The OpenVPN server contains
@@ -75,7 +79,7 @@ def create_ca(CN, C="", ST="", L="", O="", OU="", emailAddress="", hashalgorithm
     return (cacert, cakey)
 
 # Create a new slave cert.
-def create_slave_certificate(csr, cakey, cacert, serial):
+def create_slave_certificate(csr, cakey, cacert, serial, is_server):
     cert = crypto.X509()
     cert.set_serial_number(serial)
     cert.gmtime_adj_notBefore(0)
@@ -87,14 +91,24 @@ def create_slave_certificate(csr, cakey, cacert, serial):
 
     extensions = []
     extensions.append(crypto.X509Extension(b'basicConstraints', False ,b'CA:FALSE'))
-
     extensions.append(crypto.X509Extension(b'subjectKeyIdentifier' , False , b'hash', subject=cert))
     extensions.append(crypto.X509Extension(b'authorityKeyIdentifier' , False, b'keyid:always,issuer:always', subject=cacert, issuer=cacert))
+    
+    if is_server:
+        extensions.append(crypto.X509Extension(b"keyUsage", False, b"digitalSignature,keyEncipherment"))
+        extensions.append(crypto.X509Extension(b"extendedKeyUsage", False, b"serverAuth"))
+        extensions.append(crypto.X509Extension(b"nsCertType", False, b"server"))
+    else:
+        extensions.append(crypto.X509Extension(b"keyUsage", False, b"digitalSignature"))
+        extensions.append(crypto.X509Extension(b"extendedKeyUsage", False, b"clientAuth"))
+        extensions.append(crypto.X509Extension(b"nsCertType", False, b"client"))
 
     cert.add_extensions(extensions)
     cert.sign(cakey, 'sha256WithRSAEncryption')
 
     return cert
+
+
 
 # Dumps content to a string
 def dump_file_in_mem(material, format=crypto.FILETYPE_PEM):
@@ -138,7 +152,7 @@ def retrieve_cert_from_file(certfile):
     return load_from_file(certfile, crypto.X509)
 
 
-def make_new_ovpn_file(ca_cert, ca_key, clientname, serial, commonoptspath, filepath):
+def make_new_ovpn_file(ca_cert, ca_key, tlsauth_key, CN, serial, commonoptspath, filepath, is_server=False):
 
     # Read our common options file first
     f = open(commonoptspath, 'r')
@@ -151,58 +165,65 @@ def make_new_ovpn_file(ca_cert, ca_key, clientname, serial, commonoptspath, file
     # Generate a new private key pair for a new certificate.
     key = make_keypair()
     # Generate a certificate request
-    csr = make_csr(key, clientname)
+    csr = make_csr(key, CN)
     # Sign the certificate with the new csr
-    crt = create_slave_certificate(csr, cakey, cacert, serial)
+    crt = create_slave_certificate(csr, cakey, cacert, serial, is_server=is_server)
 
     # Now we have a successfully signed certificate. We must now
     # create a .ovpn file and then dump it somewhere.
     clientkey  = dump_file_in_mem(key)
     clientcert = dump_file_in_mem(crt)
     cacertdump = dump_file_in_mem(cacert)
-    ovpn = "%s<ca>\n%s</ca>\n<cert>\n%s</cert>\n<key>\n%s</key>\n" % (common, cacertdump, clientcert, clientkey)
+    #ovpn = "%s<ca>\n%s</ca>\n<cert>\n%s</cert>\n<key>\n%s</key>\n" % (common, cacertdump.decode('ascii'), clientcert.decode('ascii'), clientkey.decode('ascii'))
+    ovpn = f"{common}\n" + \
+           f"\n<ca>\n{cacertdump.decode('ascii')}</ca>\n" + \
+           f"\n<cert>\n{clientcert.decode('ascii')}</cert>\n" + \
+           f"\n<key>\n{clientkey.decode('ascii')}</key>\n" + \
+           f"\n<tls-auth>\n{tlsauth_key}</tls-auth>\n\n"
 
     # Write our file.
-    f = open(filepath, 'w')
+    f = open(filepath, 'wt')
     f.write(ovpn)
     f.close()
 
-def create_ca_if_missing_deleteme_pes():
-    from time import gmtime
-    #from OpenSSL import crypto, SSL
-    C_F = "./ca.crt"
-    K_F = "./ca.key"
-    # create a key pair
-    k = crypto.PKey()
-    k.generate_key(crypto.TYPE_RSA, 1024)
-    # create a self-signed cert
-    cert = crypto.X509()
-    cert.get_subject().C = "NZ" #raw_input("Country: ")
-    cert.get_subject().ST = "AUCKLAND" #raw_input("State: ")
-    cert.get_subject().L = "AUCKLAND" #raw_input("City: ")
-    cert.get_subject().O = "NSP" #raw_input("Organization: ")
-    cert.get_subject().OU = "IT" #raw_input("Organizational Unit: ")
-    cert.get_subject().CN = "CA-20180712" #CN
-    cert.set_serial_number(1000) #inc when renew
-    cert.gmtime_adj_notBefore(0) #not valid before present time 
-    cert.gmtime_adj_notAfter(315360000) # 3,650 days, 10y
-    cert.set_issuer(cert.get_subject())
-    cert.set_pubkey(k)
-    cert.sign(k, 'sha1')
-    open(C_F, "wt").write(
-    crypto.dump_certificate(crypto.FILETYPE_PEM, cert))
-    open(K_F, "wt").write(
-    crypto.dump_privatekey(crypto.FILETYPE_PEM, k))
 
-def create_ca_if_missing():
+def create_ca_if_missing(ca_name="ca"):
     #create_ca(CN, C="", ST="", L="", O="", OU="", emailAddress="", hashalgorithm='sha256WithRSAEncryption'):
-    cacert, cakey = create_ca(CN="pestestca")
-    open("./ca.crt", "wb").write(dump_file_in_mem(cacert))
-    open("./ca.key", "wb").write(dump_file_in_mem(cakey))
+    cacert, cakey = create_ca(CN=f"{ca_name}")
+    open(f"./{ca_name}.crt", "wb").write(dump_file_in_mem(cacert))
+    open(f"./{ca_name}.key", "wb").write(dump_file_in_mem(cakey))
+
+
+def gen_tlsauth_key():
+    """Generate an openvpn secret key by calling openvpn. Returns a string."""
+    cmd = ['openvpn', '--genkey', '--secret', 'ta.tmp']
+    ret = subprocess.check_call(cmd)
+    with open('ta.tmp') as key:
+        key = key.read()
+    os.remove('ta.tmp')
+    return key
 
 if __name__ == "__main__":
-    create_ca_if_missing()
-    make_new_ovpn_file(ca_cert="ca.crt", ca_key="ca.key",
-                       clientname="justasictest", serial=0x0C,
-                       commonoptspath="common.txt",  filepath="justastictest.ovpn")
+    name="test"
+    count = 3
+
+    tn = datetime.datetime.now().strftime("%Y%m%d_%Hh%M")
+    ca_name=f"{name}_ca_{tn}"
+    create_ca_if_missing(ca_name=ca_name)
+    tlsauth_key=gen_tlsauth_key()
+    
+    for c in range(1,3): #create 2 server certs
+        make_new_ovpn_file(is_server=True,
+                       ca_cert=f"{ca_name}.crt", ca_key=f"{ca_name}.key",
+                       tlsauth_key=tlsauth_key,
+                       CN=f"{name}_server_{tn}_{c}", serial=random.randint(1, 99),
+                       commonoptspath="ovpn-common.txt",  filepath=f"{name}_server_{tn}_{c}.ovpn")
+
+    for c in range(1,1+count):
+        make_new_ovpn_file(ca_cert=f"{ca_name}.crt", ca_key=f"{ca_name}.key",
+                           tlsauth_key=tlsauth_key,
+                           CN=f"{name}_client_{tn}_{c}", serial=random.randint(100, 99999999),
+                           commonoptspath="ovpn-common.txt",  filepath=f"{name}_client_{tn}_{c}.ovpn")
     print("Done")
+
+
