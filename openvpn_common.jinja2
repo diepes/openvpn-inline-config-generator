@@ -6,7 +6,9 @@ dev tun-az
 #Azure-ras-vm=13.75.221.215
 
 {% if is_server %} #SERVER
-server {{ server_ip_pool }}
+bb {{ server }}
+aa {{ server['server'] }}
+xx server yy{{ server['server'][ 'ip_pool' ] }}
 #route
 tls-server
 remote-cert-tls client
@@ -15,13 +17,15 @@ tls-auth direction 0
 # # iroute
 
 {% else %} #CLIENT
+#{{ servers }}
 client
 nobind
 remote-random
-{% for remote in remotes %}
+{% for server in servers %}
+{%     set s = server['server'] %}
 <connection>
-  # {{ remote.name }}
-  remote {{ remote.ip }}
+  # {{ s['name'] }}
+  remote {{ s['connect'] }}
   #tls-remote <CN>
 </connection>
 {% endfor %}

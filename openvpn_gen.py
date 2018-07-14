@@ -8,8 +8,11 @@ import random
 import jinja2
 #
 import argparse, logging, sys
+#
+import yaml
+import re
 # logging level set with -v flag
-logging.basicConfig(level=logging.INFO,format='[%(levelname)-5s] %(message)s')
+logging.basicConfig(level=logging.INFO,format='[%(levelname)-5s :%(lineno)s-%(funcName)s()] %(message)s')
 logging.warning("Start!")
 #
 ''' PES clone 2018-07-12
@@ -28,6 +31,7 @@ logging.warning("Start!")
 
 # Create a new keypair of specified algorithm and number of bits.
 def make_keypair(algorithm=crypto.TYPE_RSA, numbits=2048):
+    logging.debug(f"   algorithm={algorithm} , numbits={numbits}")
     pkey = crypto.PKey()
     pkey.generate_key(algorithm, numbits)
     return pkey
@@ -58,8 +62,8 @@ def make_csr(pkey, CN, C=None, ST=None, L=None, O=None, OU=None, emailAddress=No
     return req
 
 # Create a certificate authority (if we need one)
-def create_ca(CN, C="", ST="", L="", O="", OU="", emailAddress="", hashalgorithm='sha256WithRSAEncryption'):
-    cakey = make_keypair()
+def create_ca(CN, C="", ST="", L="", O="", OU="", emailAddress="", hashalgorithm='sha256WithRSAEncryption', keysize=2048 ):
+    cakey = make_keypair(numbits=keysize)
     careq = make_csr(cakey, CN=CN)
     cacert = crypto.X509()
     cacert.set_serial_number(0)
@@ -159,45 +163,37 @@ def retrieve_cert_from_file(certfile):
     return load_from_file(certfile, crypto.X509)
 
 
-def make_new_ovpn_file(ca_cert, ca_key, tlsauth_key, dh, CN, serial, commonoptspath, filepath, is_server=False):
-
+def make_new_ovpn_file(ca_cert, ca_key, tlsauth_key, dh, CN, serial
+                       , commonoptspath, filepath
+                       , keysize=2048
+                       , is_server=False
+                       , servers=None, server=None
+                       , clients=None, client=None):
     # Read our common options file first
     f = open(commonoptspath, 'r')
     common = f.read()
     f.close()
-    j2_env = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.dirname(os.path.abspath(__file__))), trim_blocks=True)
 
-    common = j2_env.get_template(commonoptspath).render(
-        title='Hellow Gist from GutHub',
-        is_server=is_server,
-        CN=CN,
-        client_server = "server"  if is_server else "client",
-        tls_auth_direction = 0 if is_server else 1
-    )
-
-    cacert = retrieve_cert_from_file(ca_cert)
-    cakey  = retrieve_key_from_file(ca_key)
+    #ca_cert = retrieve_cert_from_file(ca_cert)
+    #ca_key  = retrieve_key_from_file(ca_key)
 
     # Generate a new private key pair for a new certificate.
-    key = make_keypair()
+    key = make_keypair(numbits=keysize)
     # Generate a certificate request
     csr = make_csr(key, CN)
     # Sign the certificate with the new csr
-    crt = create_slave_certificate(csr, cakey, cacert, serial, is_server=is_server)
+    crt = create_slave_certificate(csr, ca_key, ca_cert, serial, is_server=is_server)
 
     # Now we have a successfully signed certificate. We must now
     # create a .ovpn file and then dump it somewhere.
     clientkey  = dump_file_in_mem(key)
     clientcert = dump_file_in_mem(crt)
-    cacertdump = dump_file_in_mem(cacert)
-    #ovpn = "%s<ca>\n%s</ca>\n<cert>\n%s</cert>\n<key>\n%s</key>\n" % (common, cacertdump.decode('ascii'), clientcert.decode('ascii'), clientkey.decode('ascii'))
-    #x = f"{common}\n".format(tls_auth_direction = 1 if is_server else 0 , client_server = "server"  if is_server else "client" )
-    ovpnx = f"{common}\n" + \
-           f"\n<ca>\n{cacertdump.decode('ascii')}</ca>\n" + \
-           f"\n#cert CN=\"{CN}\"\n<cert>\n{clientcert.decode('ascii')}</cert>\n" + \
-           f"\n#key CN=\"{CN}\"\n<key>\n{clientkey.decode('ascii')}</key>\n" + \
-           f"\n<tls-auth>\n{tlsauth_key}</tls-auth>\n" +\
-           f"\n<dh>\n{dh}</dh>\n\n"
+    cacertdump = dump_file_in_mem(ca_cert)
+    logging.debug(f"is_server={is_server} server={server} client={client}")
+
+
+    j2_env = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.dirname(os.path.abspath(__file__)))
+                                , trim_blocks=True)
     ovpn = j2_env.get_template(commonoptspath).render(
         title='Hellow Gist from GutHub',
         is_server=is_server,
@@ -207,10 +203,8 @@ def make_new_ovpn_file(ca_cert, ca_key, tlsauth_key, dh, CN, serial, commonoptsp
         clientkey=clientkey.decode('ascii').strip(),
         tlsauth_key=tlsauth_key.strip(),
         dh=dh.strip(),
-        remotes=[
-                  {"ip": "13.75.221.225 1194 udp", "name": "Azure - INF -RAS01" },
-                ],
-        server_ip_pool = "192.168.10.0  255.255.255.0",
+        servers=servers,
+        server=server
     )
     # Write our file.
     f = open(filepath, 'wt')
@@ -218,9 +212,11 @@ def make_new_ovpn_file(ca_cert, ca_key, tlsauth_key, dh, CN, serial, commonoptsp
     f.close()
 
 
-def create_ca_if_missing(ca_name="ca"):
+def create_ca_if_missing(ca_name="ca",keysize=2048 ):
+    '''not used '''
+    exit(1)
     #create_ca(CN, C="", ST="", L="", O="", OU="", emailAddress="", hashalgorithm='sha256WithRSAEncryption'):
-    cacert, cakey = create_ca(CN=f"{ca_name}", C="New Zealand", ST="Auckland", O="NSP", OU="IT")
+    cacert, cakey = create_ca(CN=f"{ca_name}", C="New Zealand", ST="Auckland", O="NSP", OU="IT", keysize=keysize)
     open(f"./{ca_name}.crt", "wb").write(dump_file_in_mem(cacert))
     open(f"./{ca_name}.key", "wb").write(dump_file_in_mem(cakey))
 
@@ -234,29 +230,38 @@ def gen_tlsauth_key():
     os.remove('ta.tmp')
     return key
 
-def gen_dhparam_dh():
+def gen_dhparam_dh(filename='openvpn_dh4096.dh'):
     """Generate an difyhelman key by calling openssl. Returns a string."""
-    if not os.path.isfile('dh4096.tmp'):
-        cmd = ['openssl', 'dhparam', '-out dh4096.tmp', '4096', '2>/dev/null']
+    if not os.path.isfile(filename):
+        cmd = [rf'/usr/bin/openssl dhparam -out {filename} 4096 2>/dev/null']
         ret = subprocess.check_call(cmd)
-    with open('dh4096.tmp') as key:
+    with open(filename) as key:
         key = key.read()
     #os.remove('dh4096.tmp')
     return key
 def get_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("-c", "--config", dest="config", type=str,
+                        default="openvpn_sample.conf.yaml",
+                        help="set config in yaml file"
+                        )
+
     parser.add_argument("-v", "--verbose", dest="verbose", action="count",
                         default=0,
                         help="increase output verbosity"
                         )
     parser.add_argument("--template", dest="template", nargs='?', type=str,
-                        default="ovpn-common.jinja2",
+                        default="openvpn_common.jinja2",
                         help="template to deploy on azure."
                         )
-    parser.add_argument("--name", dest="name", nargs='?', type=str,
-                        default="test",
+    parser.add_argument("-p", "--prefix", dest="prefix", type=str,
                         help="prefix name for openvpn configs."
+                        ) #, nargs='?'
+    parser.add_argument("--keysize", dest="keysize", nargs='?', type=int,
+                        default=2048, choices =[ 2048, 4096 ],
+                        help="rsa key size. 2048 fine, 4096 possible."
                         )
+
     parser.add_argument("--count-client", dest="count_client", nargs='?', type=int,
                         default=3,
                         help="number of client templates."
@@ -278,29 +283,71 @@ def get_args():
         logging.debug(f"set logging.level to DEBUG verbose={args.verbose}")
 
     logging.debug(f"sys.argv[0]={sys.argv[0]}  ,args={args}")
-    return args
 
-if __name__ == "__main__":
+    if os.path.isfile(args.config):
+        with open(args.config, 'r') as ymlfile:
+            cfg = yaml.load(ymlfile)
+            logging.info(f"loaded config from {args.config}")
+            logging.debug(f"config from {args.config} is: {cfg}")
+            #if cfg has prefix, but none passed in args, prevent prefix=None
+            if ( 'prefix' in cfg ) and ( not args.prefix ): args.prefix = cfg['prefix']
+    else:
+        logging.warn(f"missing config file {args.config}")
+        cfg = dict()
+    #Note: vars changes the namespace to a dict,  **x, **y merge dicts
+    return { **cfg , **vars(args) }
+
+def main():
     args = get_args()
-    commonoptspath=args.template
-
+    logging.debug(f"__main___ args={args}")
+    #commonoptspath=args["template"]
     tn = datetime.datetime.now().strftime("%Y%m%d_%Hh%M")
-    ca_name=f"{args.name}_ca_{tn}"
-    create_ca_if_missing(ca_name=ca_name)
+    ca_name=f"{args['prefix']}_{tn}_ca"
+    #create_ca_if_missing(ca_name=ca_name)
+    ca_cert, ca_key = create_ca( CN=f"{ca_name}"
+                                ,C="New Zealand"
+                                ,ST="Auckland"
+                                ,O="NSP"
+                                ,OU="IT"
+                                ,keysize=args['keysize'] )
     tlsauth_key=gen_tlsauth_key()
     dh=gen_dhparam_dh()
-    for c in range(1,1+args.count_server): #create 2 server certs
-        make_new_ovpn_file(is_server=True,
-                       ca_cert=f"{ca_name}.crt", ca_key=f"{ca_name}.key",
-                       tlsauth_key=tlsauth_key, dh=dh,
-                       CN=f"{args.name}_server_{tn}_{c}", serial=random.randint(1, 99),
-                       commonoptspath=args.template,  filepath=f"{args.name}_server_{tn}_{c}.ovpn.conf")
 
-    for c in range(1,1+args.count_client):
-        make_new_ovpn_file(ca_cert=f"{ca_name}.crt", ca_key=f"{ca_name}.key",
+    if not "servers" in args.keys():
+        args['servers']=[ {'server': {'name':'Dummy', 'connect': '10.0.0.1 1194 udp' , 'ip_pool' : 'N.A'}}, ]
+        logging.info("no servers found in config creating a dummy config.")
+
+    for c,server in enumerate(args['servers'], 1): #create 2 server certs
+        #remove illegal chars from file name.
+        name=re.sub( r'\s+|\\|/|:|_','', server['server']['name'] ).lower()
+        logging.debug(f"... creating server config c={c} {name} server={server['server']}")
+        make_new_ovpn_file(is_server=True,
+                       ca_cert=ca_cert, ca_key=ca_key,
+                       tlsauth_key=tlsauth_key, dh=dh,
+                       CN=f"{args['prefix']}_{tn}_server_{c}_{name}", serial=random.randint(1, 99),
+                       commonoptspath=args['template'],  filepath=f"{args['prefix']}_{tn}_server_{c}_{name}.ovpn.conf",
+                       server=server,
+                       servers=args['servers'],
+                       clients=args['clients']
+                       )
+    if not "clients" in args.keys():
+        args['clients']=[ {'client': {'name':'DummyClient'} }, ]
+        logging.info("no clients found in config creating a dummy config.")
+
+    for c,client in enumerate(args['clients'], 1):
+        #remove illegal chars from file name.
+        name=re.sub( r'\s+|\\|/|:|_','', client['client']['name'] ).lower()
+        make_new_ovpn_file(ca_cert=ca_cert, ca_key=ca_key,
                            tlsauth_key=tlsauth_key, dh=dh,
-                           CN=f"{args.name}_client_{tn}_{c}", serial=random.randint(100, 99999999),
-                           commonoptspath=args.template,  filepath=f"{args.name}_client_{tn}_{c}.ovpn.conf")
+                           CN=f"{args['prefix']}_{tn}_client_{c}_{name}", serial=random.randint(100, 99999999),
+                           commonoptspath=args['template'],
+                           filepath=f"{args['prefix']}_{tn}_client_{c}_{name}.ovpn.conf",
+                           servers=args['servers'],
+                           clients=args['clients'],
+                           client=client
+                           )
+if __name__ == "__main__":
+    main()
     print("Done")
 
 
