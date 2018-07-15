@@ -343,7 +343,8 @@ def main():
                            filepath=f"{args['prefix']}_{tn}_client_{c}_{name}.ovpn.conf",
                            vpn_servers=args['vpn_servers'],
                            vpn_clients=args['vpn_clients'],
-                           this_client=client['client']
+                           this_client=client['client'],
+                           this_server={ 'vpn_ip' : args['network'].network_address +1 }
                            )
     #2nd Loop servers.
     if not "vpn_servers" in args.keys():
@@ -354,7 +355,6 @@ def main():
         server['server']['count']=c
         server['server']['vpn_ip'] = args['network'].network_address +1
         server['server']['vpn_mask']= args['network'].netmask
-        print(args['vpn_servers'][1]['server'])
         #remove illegal chars from file name.
         name=re.sub( r'\s+|\\|/|:|_','', server['server']['name'] ).lower()
         logging.debug(f"... creating server config c={c} {name} server={server['server']}")
