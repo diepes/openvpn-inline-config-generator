@@ -6,6 +6,7 @@ import datetime
 import subprocess
 import random
 import jinja2
+import ipaddress
 #
 import argparse, logging, sys
 #
@@ -162,13 +163,14 @@ def retrieve_csr_from_file(csrfile):
 def retrieve_cert_from_file(certfile):
     return load_from_file(certfile, crypto.X509)
 
-
+#######################################################################
 def make_new_ovpn_file(ca_cert, ca_key, tlsauth_key, dh, CN, serial
                        , commonoptspath, filepath
                        , keysize=2048
                        , is_server=False
-                       , servers=None, server=None
-                       , clients=None, client=None):
+                       , vpn_servers=None, this_server=None
+                       , vpn_clients=None, this_client=None ):
+    ''' Make config template '''                   
     # Read our common options file first
     f = open(commonoptspath, 'r')
     common = f.read()
@@ -189,11 +191,13 @@ def make_new_ovpn_file(ca_cert, ca_key, tlsauth_key, dh, CN, serial
     clientkey  = dump_file_in_mem(key)
     clientcert = dump_file_in_mem(crt)
     cacertdump = dump_file_in_mem(ca_cert)
-    logging.debug(f"is_server={is_server} server={server} client={client}")
+    logging.debug(f"is_server={is_server} this_server={this_server} this_client={this_client}")
 
 
-    j2_env = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.dirname(os.path.abspath(__file__)))
-                                , trim_blocks=True)
+    j2_env = jinja2.Environment(
+                loader=jinja2.FileSystemLoader(os.path.dirname(os.path.abspath(__file__)))
+                , trim_blocks=True )
+
     ovpn = j2_env.get_template(commonoptspath).render(
         title='Hellow Gist from GutHub',
         is_server=is_server,
@@ -203,8 +207,10 @@ def make_new_ovpn_file(ca_cert, ca_key, tlsauth_key, dh, CN, serial
         clientkey=clientkey.decode('ascii').strip(),
         tlsauth_key=tlsauth_key.strip(),
         dh=dh.strip(),
-        servers=servers,
-        server=server
+        vpn_servers=vpn_servers,
+        vpn_clients=vpn_clients,
+        this_server=this_server,
+        this_client=this_client
     )
     # Write our file.
     f = open(filepath, 'wt')
@@ -231,7 +237,7 @@ def gen_tlsauth_key():
     return key
 
 def gen_dhparam_dh(filename='openvpn_dh4096.dh'):
-    """Generate an difyhelman key by calling openssl. Returns a string."""
+    """Generate an diffie hellman key by calling openssl. Returns a string."""
     if not os.path.isfile(filename):
         cmd = [rf'/usr/bin/openssl dhparam -out {filename} 4096 2>/dev/null']
         ret = subprocess.check_call(cmd)
@@ -294,11 +300,18 @@ def get_args():
     else:
         logging.warn(f"missing config file {args.config}")
         cfg = dict()
+
+    cfg['network']=ipaddress.ip_network(re.sub( r'\s+','/', cfg['vpn_config']['ip_subnet'].strip() ))
+
     #Note: vars changes the namespace to a dict,  **x, **y merge dicts
     return { **cfg , **vars(args) }
 
 def main():
     args = get_args()
+
+    #print(args['network'].network_address)
+    #print(args['network'].network_address+1)
+    #print(args['network'].netmask)
     logging.debug(f"__main___ args={args}")
     #commonoptspath=args["template"]
     tn = datetime.datetime.now().strftime("%Y%m%d_%Hh%M")
@@ -312,12 +325,36 @@ def main():
                                 ,keysize=args['keysize'] )
     tlsauth_key=gen_tlsauth_key()
     dh=gen_dhparam_dh()
+    #First loop client to get count
+    if not "vpn_clients" in args.keys():
+        args['vpn_clients']=[ {'client': {'name':'DummyClient'} }, ]
+        logging.info("no clients found in config creating a dummy config.")
 
-    if not "servers" in args.keys():
-        args['servers']=[ {'server': {'name':'Dummy', 'connect': '10.0.0.1 1194 udp' , 'ip_pool' : 'N.A'}}, ]
+    for c, client in enumerate(args['vpn_clients'], 1):
+        client['client']['count']   = c
+        client['client']['vpn_ip']  = args['network'].network_address +10 +c #Start @11
+        client['client']['vpn_mask']= args['network'].netmask
+        #remove illegal chars from file name.
+        name=re.sub( r'\s+|\\|/|:|_','', client['client']['name'] ).lower()
+        make_new_ovpn_file(ca_cert=ca_cert, ca_key=ca_key,
+                           tlsauth_key=tlsauth_key, dh=dh,
+                           CN=f"{args['prefix']}_{tn}_client_{c}_{name}", serial=random.randint(100, 99999999),
+                           commonoptspath=args['template'],
+                           filepath=f"{args['prefix']}_{tn}_client_{c}_{name}.ovpn.conf",
+                           vpn_servers=args['vpn_servers'],
+                           vpn_clients=args['vpn_clients'],
+                           this_client=client['client']
+                           )
+    #2nd Loop servers.
+    if not "vpn_servers" in args.keys():
+        args['vpn_servers']=[ {'server': {'name':'Dummy', 'connect': '10.0.0.1 1194 udp' , 'ip_pool' : 'N.A'}}, ]
         logging.info("no servers found in config creating a dummy config.")
 
-    for c,server in enumerate(args['servers'], 1): #create 2 server certs
+    for c,server in enumerate(args['vpn_servers'], 1): #create 2 server certs
+        server['server']['count']=c
+        server['server']['vpn_ip'] = args['network'].network_address +1
+        server['server']['vpn_mask']= args['network'].netmask
+        print(args['vpn_servers'][1]['server'])
         #remove illegal chars from file name.
         name=re.sub( r'\s+|\\|/|:|_','', server['server']['name'] ).lower()
         logging.debug(f"... creating server config c={c} {name} server={server['server']}")
@@ -326,26 +363,10 @@ def main():
                        tlsauth_key=tlsauth_key, dh=dh,
                        CN=f"{args['prefix']}_{tn}_server_{c}_{name}", serial=random.randint(1, 99),
                        commonoptspath=args['template'],  filepath=f"{args['prefix']}_{tn}_server_{c}_{name}.ovpn.conf",
-                       server=server,
-                       servers=args['servers'],
-                       clients=args['clients']
+                       vpn_servers=args['vpn_servers'],
+                       vpn_clients=args['vpn_clients'],
+                       this_server=server['server']
                        )
-    if not "clients" in args.keys():
-        args['clients']=[ {'client': {'name':'DummyClient'} }, ]
-        logging.info("no clients found in config creating a dummy config.")
-
-    for c,client in enumerate(args['clients'], 1):
-        #remove illegal chars from file name.
-        name=re.sub( r'\s+|\\|/|:|_','', client['client']['name'] ).lower()
-        make_new_ovpn_file(ca_cert=ca_cert, ca_key=ca_key,
-                           tlsauth_key=tlsauth_key, dh=dh,
-                           CN=f"{args['prefix']}_{tn}_client_{c}_{name}", serial=random.randint(100, 99999999),
-                           commonoptspath=args['template'],
-                           filepath=f"{args['prefix']}_{tn}_client_{c}_{name}.ovpn.conf",
-                           servers=args['servers'],
-                           clients=args['clients'],
-                           client=client
-                           )
 if __name__ == "__main__":
     main()
     print("Done")

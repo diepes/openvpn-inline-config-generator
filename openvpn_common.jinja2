@@ -1,47 +1,73 @@
 #ovpn-common.jinja2 - CN={{ CN }}
 #PES 2018-07-12 template
 verb 3
-dev tun-az
+dev-type tap
+dev tap-az
 #Azure-vpn-vm=13.73.199.180
 #Azure-ras-vm=13.75.221.215
 
-{% if is_server %} #SERVER
-bb {{ server }}
-aa {{ server['server'] }}
-xx server yy{{ server['server'][ 'ip_pool' ] }}
+{% if is_server %}
+## SERVER name:"{{ this_server['name'] }}"
+##Hand out ip's for tunnel from ip_pool
+#server {{ this_server[ 'ip_pool' ] }}
+mode server
+ifconfig {{ this_server['vpn_ip'] }} {{ this_server['vpn_mask'] }}
+mode server
+#ifconfig-pool 192.168.10.11 192.168.10.33 255.255.255.0
+
 #route
 tls-server
 remote-cert-tls client
 tls-auth direction 0
 #client-config-dir ccd
 # # iroute
+#ifconfig-pool-persist ipp.txt
+#to limit mtu issues, tap + encryption.
+mssfix 1400
+#Add client routes to the server
+{%    for client in vpn_clients %}
+# Client {{ client['client']['count'] }} name: {{ client['client']['name'] }}
+{%        for subnet in client['client']['subnets'] %}
+route {{ subnet }} via {{  client['client']['vpn_ip'] }}
+{%        endfor %}
+{%    endfor %}{# end client routes #}
 
-{% else %} #CLIENT
-#{{ servers }}
+{% else %}{# /server #}
+## CLIENT #name:{{ this_client['name'] }}
 client
 nobind
 remote-random
-{% for server in servers %}
+#Static client ip's 
+ifconfig {{ this_client['vpn_ip'] }} {{ this_client['vpn_mask'] }}
+{% for server in vpn_servers %}
 {%     set s = server['server'] %}
-<connection>
-  # {{ s['name'] }}
-  remote {{ s['connect'] }}
-  #tls-remote <CN>
+
+<connection> # {{ s['name'] }}
+    remote {{ s['connect'] }}
+    # tls-remote <CN>
 </connection>
+# Add routes to client for the specific server
+{%     if "subnets_local" in s %}
+{%         for subnet in s['subnets_local'] %}
+    route {{ subnet }}
+{%         endfor %}
+{%     endif %}
+
 {% endfor %}
 
 tls-client
 #only allow certs issued to server's
-#remote-cert-tls server
-ns-cert-type server
+remote-cert-tls server
+#ns-cert-type server
 tls-auth direction 1
 
-{% endif %}
+{% endif %}{# /client #}
 
 #From v2.4 tls-crypt can be used
 cipher AES-256-CBC
 
-comp-lzo
+#comp-lzo
+compress lzo
 keepalive 10 60
 ping-timer-rem
 persist-tun
