@@ -2,7 +2,7 @@
 #PES 2018-07-12 template
 verb 3
 dev-type tap
-dev tap-az
+dev {{ tap_interface_name }}
 #Azure-vpn-vm=13.73.199.180
 #Azure-ras-vm=13.75.221.215
 
@@ -12,13 +12,16 @@ dev tap-az
 #server {{ this_server[ 'ip_pool' ] }}
 mode server
 ifconfig {{ this_server['vpn_ip'] }} {{ this_server['vpn_mask'] }}
-mode server
-#ifconfig-pool 192.168.10.11 192.168.10.33 255.255.255.0
 
-#route
+#client-to-client
+
 tls-server
 remote-cert-tls client
-tls-auth direction 0
+
+##Note: https://community.openvpn.net/openvpn/wiki/Hardening#Useof--tls-auth
+#key-direction 0
+tls-auth [inline] 0
+
 #client-config-dir ccd
 # # iroute
 #ifconfig-pool-persist ipp.txt
@@ -61,15 +64,17 @@ tls-client
 #only allow certs issued to server's
 remote-cert-tls server
 #ns-cert-type server
-tls-auth direction 1
+##Note: https://community.openvpn.net/openvpn/wiki/Hardening#Useof--tls-auth
+#key-direction 1
+tls-auth [inline] 1
 
 {% endif %}{# /client #}
 
 #From v2.4 tls-crypt can be used
 cipher AES-256-CBC
 
-#comp-lzo
-compress lzo
+comp-lzo
+#compress lzo
 keepalive 10 60
 ping-timer-rem
 persist-tun

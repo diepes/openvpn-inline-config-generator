@@ -169,8 +169,9 @@ def make_new_ovpn_file(ca_cert, ca_key, tlsauth_key, dh, CN, serial
                        , keysize=2048
                        , is_server=False
                        , vpn_servers=None, this_server=None
-                       , vpn_clients=None, this_client=None ):
-    ''' Make config template '''                   
+                       , vpn_clients=None, this_client=None
+                       , tap_interface_name="tap_az"):
+    ''' Make config template '''
     # Read our common options file first
     f = open(commonoptspath, 'r')
     common = f.read()
@@ -210,7 +211,8 @@ def make_new_ovpn_file(ca_cert, ca_key, tlsauth_key, dh, CN, serial
         vpn_servers=vpn_servers,
         vpn_clients=vpn_clients,
         this_server=this_server,
-        this_client=this_client
+        this_client=this_client,
+        tap_interface_name=tap_interface_name
     )
     # Write our file.
     f = open(filepath, 'wt')
@@ -344,7 +346,8 @@ def main():
                            vpn_servers=args['vpn_servers'],
                            vpn_clients=args['vpn_clients'],
                            this_client=client['client'],
-                           this_server={ 'vpn_ip' : args['network'].network_address +1 }
+                           this_server={ 'vpn_ip' : args['network'].network_address +1 },
+                           tap_interface_name=args['tap_interface_name']
                            )
     #2nd Loop servers.
     if not "vpn_servers" in args.keys():
@@ -365,7 +368,8 @@ def main():
                        commonoptspath=args['template'],  filepath=f"{args['prefix']}_{tn}_server_{c}_{name}.ovpn.conf",
                        vpn_servers=args['vpn_servers'],
                        vpn_clients=args['vpn_clients'],
-                       this_server=server['server']
+                       this_server=server['server'],
+                       tap_interface_name=args['tap_interface_name']
                        )
 if __name__ == "__main__":
     main()
