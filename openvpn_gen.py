@@ -172,10 +172,10 @@ def make_new_ovpn_file(ca_cert, ca_key, tlsauth_key, dh, CN, serial
                        , vpn_clients=None, this_client=None
                        , tap_interface_name="tap_az"):
     ''' Make config template '''
-    # Read our common options file first
-    f = open(commonoptspath, 'r')
-    common = f.read()
-    f.close()
+    ## Read our common options file first
+    #f = open(commonoptspath, 'r')
+    #common = f.read()
+    #f.close()
 
     #ca_cert = retrieve_cert_from_file(ca_cert)
     #ca_key  = retrieve_key_from_file(ca_key)
@@ -194,9 +194,9 @@ def make_new_ovpn_file(ca_cert, ca_key, tlsauth_key, dh, CN, serial
     cacertdump = dump_file_in_mem(ca_cert)
     logging.debug(f"is_server={is_server} this_server={this_server} this_client={this_client}")
 
-
+    logging.info(f" path:{ os.path.dirname(os.path.abspath(__file__)) } ")
     j2_env = jinja2.Environment(
-                loader=jinja2.FileSystemLoader(os.path.dirname(os.path.abspath(__file__)))
+                loader=jinja2.FileSystemLoader( os.path.dirname(os.path.abspath(__file__)) )
                 , trim_blocks=True )
 
     ovpn = j2_env.get_template(commonoptspath).render(
