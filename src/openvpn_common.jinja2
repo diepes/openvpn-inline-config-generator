@@ -1,10 +1,9 @@
 #ovpn-common.jinja2 - CN={{ CN }}
+#PES 2019-10-08 cleanup
 #PES 2018-07-12 template
 verb 3
 dev-type tap
 dev {{ tap_interface_name }}
-#Azure-vpn-vm=13.73.199.180
-#Azure-ras-vm=13.75.221.215
 
 {% if is_server %}
 ## SERVER name:"{{ this_server['name'] }}"
@@ -41,7 +40,7 @@ route {{ subnet }} {{ client['client']['vpn_ip'] }}
 client
 nobind
 remote-random
-#Static client ip's 
+#Static client ip's
 ifconfig {{ this_client['vpn_ip'] }} {{ this_client['vpn_mask'] }}
 route-metric 100
 {% for server in vpn_servers %}
