@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import errno
 import socket
 from OpenSSL import crypto, SSL
 import datetime
@@ -13,10 +14,12 @@ import argparse, logging, sys
 import yaml
 import re
 # logging level set with -v flag
-logging.basicConfig(level=logging.INFO,format='[%(levelname)-5s :%(lineno)s-%(funcName)s()] %(message)s')
+logging.basicConfig(level=logging.INFO,format='[%(levelname)-7s:%(lineno)3d:%(funcName)s()] %(message)s')
 logging.warning("Start!")
 #
-''' PES clone 2018-07-12
+'''
+   PES 2019-10 Bac
+   PES clone 2018-07-12
 '''
 # OpenVPN is fairly simple since it works on OpenSSL. The OpenVPN server contains
 # a root certificate authority that can sign sub-certificates. The certificates
@@ -194,13 +197,14 @@ def make_new_ovpn_file(ca_cert, ca_key, tlsauth_key, dh, CN, serial
     cacertdump = dump_file_in_mem(ca_cert)
     logging.debug(f"is_server={is_server} this_server={this_server} this_client={this_client}")
 
-    logging.info(f" path:{ os.path.dirname(os.path.abspath(__file__)) } ")
+    logging.info(f" jinja2 path:{ os.path.dirname(os.path.abspath(__file__)) }  commonoptspath:{commonoptspath}")
     j2_env = jinja2.Environment(
                 loader=jinja2.FileSystemLoader( os.path.dirname(os.path.abspath(__file__)) )
                 , trim_blocks=True )
 
+    #template default="openvpn_common.jinja2"
     ovpn = j2_env.get_template(commonoptspath).render(
-        title='Hellow Gist from GutHub',
+        title='Hello Github openvpn gen',
         is_server=is_server,
         CN=CN,
         cacert=cacertdump.decode('ascii').strip(),
@@ -317,6 +321,19 @@ def main():
     logging.debug(f"__main___ args={args}")
     #commonoptspath=args["template"]
     tn = datetime.datetime.now().strftime("%Y%m%d_%Hh%M")
+
+    filedir=f"{args['prefix']}-{tn}"
+    if not os.path.exists(filedir):
+        try:
+            logging.info(f"mkdir for configs {filedir}")
+            os.makedirs(filedir)
+        except OSError as exc: # Guard against race condition
+            if exc.errno != errno.EEXIST:
+                raise
+    else:
+        logging.error(f"config dir already exists wait one minure {filedir}")
+        sys.exit(1)
+
     ca_name=f"{args['prefix']}_{tn}_ca"
     #create_ca_if_missing(ca_name=ca_name)
     ca_cert, ca_key = create_ca( CN=f"{ca_name}"
@@ -327,7 +344,7 @@ def main():
                                 ,keysize=args['keysize'] )
     tlsauth_key=gen_tlsauth_key()
     dh=gen_dhparam_dh()
-    #First loop client to get count
+    #1st create client configs to get count
     if not "vpn_clients" in args.keys():
         args['vpn_clients']=[ {'client': {'name':'DummyClient'} }, ]
         logging.info("no clients found in config creating a dummy config.")
@@ -342,14 +359,15 @@ def main():
                            tlsauth_key=tlsauth_key, dh=dh,
                            CN=f"{args['prefix']}_{tn}_client_{c}_{name}", serial=random.randint(100, 99999999),
                            commonoptspath=args['template'],
-                           filepath=f"{args['prefix']}_{tn}_client_{c}_{name}.ovpn.conf",
+                           filepath=f"{filedir}/{args['prefix']}_{tn}_client_{c}_{name}.ovpn.conf",
                            vpn_servers=args['vpn_servers'],
                            vpn_clients=args['vpn_clients'],
                            this_client=client['client'],
                            this_server={ 'vpn_ip' : args['network'].network_address +1 },
                            tap_interface_name=args['tap_interface_name']
                            )
-    #2nd Loop servers.
+
+    #2nd create server configs.
     if not "vpn_servers" in args.keys():
         args['vpn_servers']=[ {'server': {'name':'Dummy', 'connect': '10.0.0.1 1194 udp' , 'ip_pool' : 'N.A'}}, ]
         logging.info("no servers found in config creating a dummy config.")
@@ -365,7 +383,8 @@ def main():
                        ca_cert=ca_cert, ca_key=ca_key,
                        tlsauth_key=tlsauth_key, dh=dh,
                        CN=f"{args['prefix']}_{tn}_server_{c}_{name}", serial=random.randint(1, 99),
-                       commonoptspath=args['template'],  filepath=f"{args['prefix']}_{tn}_server_{c}_{name}.ovpn.conf",
+                       commonoptspath=args['template'],
+                       filepath=f"{filedir}/{args['prefix']}_{tn}_server_{c}_{name}.ovpn.conf",
                        vpn_servers=args['vpn_servers'],
                        vpn_clients=args['vpn_clients'],
                        this_server=server['server'],
