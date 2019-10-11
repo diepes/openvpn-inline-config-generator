@@ -322,7 +322,7 @@ def main():
     #commonoptspath=args["template"]
     tn = datetime.datetime.now().strftime("%Y%m%d_%Hh%M")
 
-    filedir=f"{args['prefix']}-{tn}"
+    filedir=f"confGen-{args['prefix']}-{tn}"
     if not os.path.exists(filedir):
         try:
             logging.info(f"mkdir for configs {filedir}")
