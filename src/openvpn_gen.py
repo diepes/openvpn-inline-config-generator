@@ -320,9 +320,9 @@ def main():
     #print(args['network'].netmask)
     logging.debug(f"__main___ args={args}")
     #commonoptspath=args["template"]
-    tn = datetime.datetime.now().strftime("%Y%m%d_%Hh%M")
+    tn = datetime.datetime.now().strftime("%Y%m%dt%Hh%M")
 
-    filedir=f"confGen-{args['prefix']}-{tn}"
+    filedir=f"confGen-{args['prefix']}-{tn}"
     if not os.path.exists(filedir):
         try:
             logging.info(f"mkdir for configs {filedir}")
@@ -359,7 +359,7 @@ def main():
                            tlsauth_key=tlsauth_key, dh=dh,
                            CN=f"{args['prefix']}_{tn}_client_{c}_{name}", serial=random.randint(100, 99999999),
                            commonoptspath=args['template'],
-                           filepath=f"{filedir}/{args['prefix']}_{tn}_client_{c}_{name}.ovpn.conf",
+                           filepath=f"{filedir}/{args['prefix']}-{tn}-c{c}-{name}.conf",
                            vpn_servers=args['vpn_servers'],
                            vpn_clients=args['vpn_clients'],
                            this_client=client['client'],
@@ -379,12 +379,14 @@ def main():
         #remove illegal chars from file name.
         name=re.sub( r'\s+|\\|/|:|_','', server['server']['name'] ).lower()
         logging.debug(f"... creating server config c={c} {name} server={server['server']}")
+        if (len(server['server']['connect'].split(" ")) != 3):
+            logging.warn(f"WARN: connect string for server {server['name']} suspect value:{server['connect']}")
         make_new_ovpn_file(is_server=True,
                        ca_cert=ca_cert, ca_key=ca_key,
                        tlsauth_key=tlsauth_key, dh=dh,
                        CN=f"{args['prefix']}_{tn}_server_{c}_{name}", serial=random.randint(1, 99),
                        commonoptspath=args['template'],
-                       filepath=f"{filedir}/{args['prefix']}_{tn}_server_{c}_{name}.ovpn.conf",
+                       filepath=f"{filedir}/{args['prefix']}-{tn}-s{c}-{name}.conf",
                        vpn_servers=args['vpn_servers'],
                        vpn_clients=args['vpn_clients'],
                        this_server=server['server'],
