@@ -251,6 +251,8 @@ def gen_dhparam_dh(filename='openvpn_dh4096.dh'):
         key = key.read()
     #os.remove('dh4096.tmp')
     return key
+
+
 def get_args():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("-c", "--config", dest="config", type=str,
@@ -308,7 +310,7 @@ def get_args():
         cfg = dict()
 
     cfg['network']=ipaddress.ip_network(re.sub( r'\s+','/', cfg['vpn_config']['ip_subnet'].strip() ))
-
+    cfg['tap_interface_name']=cfg.get('tap_interface_name','tap_vpn')
     #Note: vars changes the namespace to a dict,  **x, **y merge dicts
     return { **cfg , **vars(args) }
 
