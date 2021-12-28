@@ -1,0 +1,64 @@
+#Sample openvpn config file
+#
+prefix: openvpn_gen
+
+vpn_config:
+  # Each server and client will get static ip in this range
+  ip_subnet: 192.168.130.0 255.255.255.0
+
+vpn_servers:
+  - server:
+      name: "RAS01-AZ"
+      connect: 31.12.15.89 1194 udp
+      ip_pool: 10.10.10.0 255.255.0.0
+      subnets_local:
+        - 10.10.1.0 255.255.255.0
+        - 10.10.2.0 255.255.255.0
+
+  - server:
+      name: "RAS02"
+      connect: 1.5.6.1 1194 udp
+      ip_pool: 10.0.0.0 255.255.255.0
+      subnets_local:
+        - 10.12.1.0 255.255.255.0
+
+  - server:
+      name: "RAS01"
+      connect: 168.1.85.254 1194 udp
+      ip_pool: 10.168.9.0  255.255.255.0
+      subnets_local: #route
+        - 10.118.0.0 255.255.0.0
+        - 10.119.0.0 255.255.0.0
+        - 10.120.0.0 255.255.0.0
+
+vpn_clients:
+  - client:
+      name: pc01MEL01
+      #ip_source:
+      #  - 201.0.0.1
+      subnets:
+        - 10.118.0.0 255.255.0.0
+
+  - client:
+      name: pc02AMS03
+      ip_source:
+        - 192.1.1.1
+        - 192.1.1.2
+      subnets:
+        - 10.136.0.0 255.255.0.0
+
+  - client:
+      name: pc03LON02
+      ip_source:
+        - 192.1.1.1
+        - 192.1.1.2
+      subnets:
+        - 10.164.0.0 255.255.0.0
+
+  - client:
+      name: hq-fw-vpn01
+      subnets:
+        - 192.168.9.0   255.255.255.0
+        - 192.168.10.0  255.255.255.0
+
+

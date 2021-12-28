@@ -1,4 +1,5 @@
 #ovpn-common.jinja2 - CN={{ CN }}
+#PES 2021-12-28 uniq ip for each server
 #PES 2019-10-08 cleanup
 #PES 2018-07-12 template
 verb 3
@@ -35,7 +36,7 @@ route {{ subnet }} {{ client['client']['vpn_ip'] }}
 {%        endfor %}
 {%    endfor %}{# end client routes #}
 
-{% else %}{# /server #}
+{% else %}{# not /server #}
 ## CLIENT #name:{{ this_client['name'] }}
 client
 nobind
@@ -50,10 +51,10 @@ route-metric 100
     remote {{ s['connect'] }}
     # tls-remote <CN>
 </connection>
-# Add routes to client for the specific server
+# Add routes to client to server {{ server['server']['count']}} name:"{{ server['server']['name'] }}"
 {%     if "subnets_local" in s %}
 {%         for subnet in s['subnets_local'] %}
-    route {{ subnet }} {{ this_server['vpn_ip'] }}
+    route {{ subnet }} {{ server['server']['vpn_ip'] }}
 {%         endfor %}
 {%     endif %}
 

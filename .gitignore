@@ -6,3 +6,4 @@
 *.ovpn.conf
 *.conf
 
+openvpn_dh4096.dh
